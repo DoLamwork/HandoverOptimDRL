@@ -40,10 +40,22 @@ def run() -> int:
     )
 
     # train_ppo
-    subparsers.add_parser(
+    train_parser = subparsers.add_parser(
         "train_ppo",
         help="Train a PPO policy for handover decisions",
         description="Trains a PPO policy to make optimal handover decisions.",
+    )
+    train_parser.add_argument(
+        "--wandb",
+        action="store_true",
+        default=False,
+        help="Enable Weights & Biases logging for training metrics visualization.",
+    )
+    train_parser.add_argument(
+        "--sweep",
+        action="store_true",
+        default=False,
+        help="Run a WandB hyperparameter sweep instead of regular training.",
     )
 
     # validate_3gpp
@@ -69,7 +81,11 @@ def run() -> int:
     if args.command == "plot_results":
         return plot_results.main(THIS_PATH)
     if args.command == "train_ppo":
-        return train_ppo.main(THIS_PATH)
+        return train_ppo.main(
+            THIS_PATH,
+            sweep=args.sweep,
+            use_wandb=args.wandb or args.sweep,
+        )
     if args.command == "validate_3gpp":
         return validate_3gpp.main(THIS_PATH)
     if args.command == "validate_ppo":

@@ -157,8 +157,9 @@ if out_of_sync (n310 or t310 pending):
 5. SB3 environment check
 6. WandB init if enabled
 7. Create PPO model with config
-8. SAVE MODEL BEFORE LEARNING (BUG! line 141-142)
-9. model.learn(total_timesteps=5e6)
+8. model.learn(total_timesteps=5e6)
+9. SAVE MODEL BEFORE LEARNING (BUG! line 141-142)
+
 10. WandB finish
 ```
 
@@ -294,6 +295,6 @@ Yes, generating a larger dataset with varied speeds (10-120 km/h) and scenarios 
 - Config: `src/ho_optim_drl/config.py`
 - Data loader: `src/ho_optim_drl/dataloader.py`
 
-All metrics and reward logic are in these files. The PPO implementation is standard SB3; the custom parts are the environment and state machine.
+All metrics and reward logic are in these f/iles. The PPO implementation is standard SB3; the custom parts are the environment and state machine.
 
 

@@ -13,6 +13,7 @@ import wandb
 from ho_optim_drl.config import Config
 import ho_optim_drl.dataloader as dl
 from ho_optim_drl.gym_env import HandoverEnvPPO
+from ho_optim_drl.wandb_callback import WandbTrainingCallback, init_wandb
 import ho_optim_drl.utils as ut
 
 SIM_ID = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -33,12 +34,11 @@ def get_sweep_config():
     }
 
 
-def main(root_path: str) -> int:
+def main(root_path: str, sweep: bool = False, use_wandb: bool = False) -> int:
     """Main function to train or sweep PPO on the handover environment."""
-    config = Config()
-    if config.use_wandb:
+    if sweep:
         return sweep_ppo(root_path)
-    return train_ppo(root_path)
+    return train_ppo(root_path, use_wandb=use_wandb)
 
 
 def sweep_ppo(root_path: str) -> int:
@@ -50,10 +50,12 @@ def sweep_ppo(root_path: str) -> int:
     return 0
 
 
-def train_ppo(root_path: str):
+def train_ppo(root_path: str, use_wandb: bool = False):
     """Train a PPO agent on the handover environment."""
     # Load configuration
     config = Config()
+    if use_wandb:
+        config.use_wandb = True
 
     # Load MATLAB files
     data_dir = os.path.join(root_path, "data", "processed")
@@ -92,9 +94,22 @@ def train_ppo(root_path: str):
     env = HandoverEnvPPO(config, rsrp_list, sinr_list, sinr_norm_list)
     check_env(env, warn=True)
 
-    # WandB
+    # WandB initialization
+    callbacks = []
     if config.use_wandb:
-        config.update(wandb.config.as_dict())
+        # If not already initialized by sweep, init a standalone run
+        if wandb.run is None:
+            init_wandb(
+                config,
+                run_name=f"ppo_{SIM_ID}",
+                project_name="handover-ppo",
+            )
+        else:
+            # Sweep mode: update config from wandb sweep
+            config.update(wandb.config.as_dict())
+
+        # Add the WandB training callback
+        callbacks.append(WandbTrainingCallback(verbose=1))
 
     # Directories
     if config.use_wandb and wandb.run is not None:
@@ -138,13 +153,26 @@ def train_ppo(root_path: str):
         tensorboard_log=tensorboard_log_dir,
         device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
     )
-    
 
-    model.learn(total_timesteps=config.n_steps_total, progress_bar=True)
+    model.learn(
+        total_timesteps=config.n_steps_total,
+        progress_bar=True,
+        callback=callbacks if callbacks else None,
+    )
 
     if SAVE_MODEL:
         model.save(model_dir)
-        
+
+        # Log model as WandB artifact
+        if config.use_wandb and wandb.run is not None:
+            model_artifact = wandb.Artifact(
+                name=f"ppo-model-{run_name}",
+                type="model",
+                description=f"PPO handover model trained at {SIM_ID}",
+            )
+            model_artifact.add_file(f"{model_dir}.zip")
+            wandb.log_artifact(model_artifact)
+
     if config.use_wandb:
         wandb.finish()
 
