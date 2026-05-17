@@ -17,7 +17,7 @@ import ho_optim_drl.utils as ut
 
 SIM_ID = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 SWEEP_NAME = "ppo_sweep"
-SAVE_MODEL = False
+SAVE_MODEL = True
 
 
 def get_sweep_config():
@@ -138,11 +138,13 @@ def train_ppo(root_path: str):
         tensorboard_log=tensorboard_log_dir,
         device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
     )
-    if SAVE_MODEL:
-        model.save(model_dir)
+    
 
     model.learn(total_timesteps=config.n_steps_total, progress_bar=True)
 
+    if SAVE_MODEL:
+        model.save(model_dir)
+        
     if config.use_wandb:
         wandb.finish()
 

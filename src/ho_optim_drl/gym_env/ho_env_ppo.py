@@ -94,6 +94,10 @@ class HandoverEnvPPO(gym.Env):
         self.terminated = False
         self.truncated = False
 
+        # Dataset cycling flag
+        self._was_truncated = False
+        self.truncated = False
+
         # Reset environment
         self.reset()
 
@@ -251,6 +255,7 @@ class HandoverEnvPPO(gym.Env):
         # Truncate episode if max episode length is reached
         if 1 + self.t == self.time_steps - 1:
             self.truncated = True
+            self._was_truncated = True  # Mark for dataset cycling on reset
 
         self.t += 1
 
