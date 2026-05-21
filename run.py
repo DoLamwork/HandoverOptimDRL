@@ -43,7 +43,14 @@ def run() -> int:
     train_parser = subparsers.add_parser(
         "train_ppo",
         help="Train a PPO policy for handover decisions",
-        description="Trains a PPO policy to make optimal handover decisions.",
+        description="Trains a PPO policy to make optimal handover decisions.\n\n"
+        "Curriculum Learning:\n"
+        "  Phase 1: Train with permit_ho_prep_abort=False (learn basics)\n"
+        "  Phase 2: Fine-tune with permit_ho_prep_abort=True (learn abort)\n\n"
+        "Example workflow:\n"
+        "  python -m run train_ppo --phase 1 --wandb\n"
+        "  python -m run train_ppo --phase 2 --load-model results/models/.../model --wandb",
+        formatter_class=argparse.RawTextHelpFormatter,
     )
     train_parser.add_argument(
         "--wandb",
@@ -56,6 +63,22 @@ def run() -> int:
         action="store_true",
         default=False,
         help="Run a WandB hyperparameter sweep instead of regular training.",
+    )
+    train_parser.add_argument(
+        "--phase",
+        type=int,
+        default=1,
+        choices=[1, 2],
+        help="Curriculum learning phase (default: 1).\n"
+        "  1: Train with HO prep abort disabled (learn basics)\n"
+        "  2: Fine-tune with HO prep abort enabled (learn when to abort)",
+    )
+    train_parser.add_argument(
+        "--load-model",
+        type=str,
+        default=None,
+        help="Path to a pre-trained model (.zip) to continue training from.\n"
+        "Used in Phase 2 to load the Phase 1 model for fine-tuning.",
     )
 
     # validate_3gpp
@@ -85,6 +108,8 @@ def run() -> int:
             THIS_PATH,
             sweep=args.sweep,
             use_wandb=args.wandb or args.sweep,
+            phase=args.phase,
+            load_model=args.load_model,
         )
     if args.command == "validate_3gpp":
         return validate_3gpp.main(THIS_PATH)

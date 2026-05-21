@@ -34,11 +34,33 @@ def get_sweep_config():
     }
 
 
-def main(root_path: str, sweep: bool = False, use_wandb: bool = False) -> int:
-    """Main function to train or sweep PPO on the handover environment."""
+def main(
+    root_path: str,
+    sweep: bool = False,
+    use_wandb: bool = False,
+    phase: int = 1,
+    load_model: str | None = None,
+) -> int:
+    """Main function to train or sweep PPO on the handover environment.
+
+    Parameters
+    ----------
+    root_path : str
+        Root path of the project.
+    sweep : bool
+        Whether to run a WandB sweep.
+    use_wandb : bool
+        Whether to use WandB logging.
+    phase : int
+        Curriculum learning phase:
+        - Phase 1: Train with permit_ho_prep_abort=False (agent learns basics)
+        - Phase 2: Fine-tune with permit_ho_prep_abort=True (agent learns abort)
+    load_model : str or None
+        Path to a pre-trained model to continue training from (for Phase 2).
+    """
     if sweep:
         return sweep_ppo(root_path)
-    return train_ppo(root_path, use_wandb=use_wandb)
+    return train_ppo(root_path, use_wandb=use_wandb, phase=phase, load_model=load_model)
 
 
 def sweep_ppo(root_path: str) -> int:
@@ -50,12 +72,52 @@ def sweep_ppo(root_path: str) -> int:
     return 0
 
 
-def train_ppo(root_path: str, use_wandb: bool = False):
-    """Train a PPO agent on the handover environment."""
+def train_ppo(
+    root_path: str,
+    use_wandb: bool = False,
+    phase: int = 1,
+    load_model: str | None = None,
+):
+    """Train a PPO agent on the handover environment.
+
+    Parameters
+    ----------
+    root_path : str
+        Root path of the project.
+    use_wandb : bool
+        Whether to use WandB logging.
+    phase : int
+        Curriculum phase (1 = no abort, 2 = with abort).
+    load_model : str or None
+        Path to pre-trained model (.zip) to load for fine-tuning.
+    """
     # Load configuration
     config = Config()
     if use_wandb:
         config.use_wandb = True
+
+    # --- Curriculum Learning ---
+    if phase == 1:
+        # Phase 1: Episodes terminate only on RLF or max timesteps.
+        # Disable HO prep abort so handovers always complete — gives
+        # the agent a real learning signal.
+        config.terminate_on_rlf = True
+        config.terminate_on_pp = False
+        config.permit_ho_prep_abort = False
+        print("[Curriculum] Phase 1: abort=False, terminate_on_pp=False")
+        print("[Curriculum] Agent learns optimal HO strategies.")
+    elif phase == 2:
+        # Phase 2: Episodes also terminate on PP events.
+        # Introduces penalty for excessive HOs, encouraging
+        # more stable connections.
+        config.terminate_on_rlf = True
+        config.terminate_on_pp = True
+        print("[Curriculum] Phase 2: terminate_on_rlf=True, terminate_on_pp=True")
+        print("[Curriculum] Agent learns to avoid excessive HOs.")
+        if load_model is None:
+            print("[WARNING] Phase 2 without --load-model: training from scratch.")
+    else:
+        raise ValueError(f"Invalid curriculum phase: {phase}. Use 1 or 2.")
 
     # Load MATLAB files
     data_dir = os.path.join(root_path, "data", "processed")
@@ -90,6 +152,9 @@ def train_ppo(root_path: str, use_wandb: bool = False):
         rsrp_list.append(rsrp_db)
         sinr_norm_list.append(sinr_norm)
 
+    print(f"[Data] Loaded {len(rsrp_list)} datasets (speeds: {use_speed_list})")
+    print(f"[Data] First dataset shape: {rsrp_list[0].shape} (time_steps, n_bs)")
+
     # Generate environment
     env = HandoverEnvPPO(config, rsrp_list, sinr_list, sinr_norm_list)
     check_env(env, warn=True)
@@ -101,12 +166,16 @@ def train_ppo(root_path: str, use_wandb: bool = False):
         if wandb.run is None:
             init_wandb(
                 config,
-                run_name=f"ppo_{SIM_ID}",
+                run_name=f"ppo_phase{phase}_{SIM_ID}",
                 project_name="handover-ppo",
             )
         else:
             # Sweep mode: update config from wandb sweep
             config.update(wandb.config.as_dict())
+
+        # Log curriculum phase
+        if wandb.run is not None:
+            wandb.config.update({"curriculum_phase": phase}, allow_val_change=True)
 
         # Add the WandB training callback
         callbacks.append(WandbTrainingCallback(verbose=1))
@@ -136,24 +205,47 @@ def train_ppo(root_path: str, use_wandb: bool = False):
         tensorboard_log_dir = None
 
     # PPO model
-    policy_kwargs = dict(
-        activation_fn=torch.nn.ReLU,
-        net_arch=dict(pi=config.net_arch, vf=config.net_arch),
-    )
-    model = PPO(
-        "MlpPolicy",
-        env,
-        ent_coef=config.ent_coef,
-        learning_rate=linear_schedule(config.lr),
-        verbose=1,
-        policy_kwargs=policy_kwargs,
-        n_steps=config.n_steps_per_update,
-        batch_size=config.batch_size,
-        n_epochs=config.n_epochs,
-        tensorboard_log=tensorboard_log_dir,
-        device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
-    )
+    if load_model is not None:
+        # Load pre-trained model and set new environment
+        model_path = load_model
+        if not model_path.endswith(".zip"):
+            model_path = model_path + ".zip"
+        if not os.path.isabs(model_path):
+            model_path = os.path.join(root_path, model_path)
 
+        print(f"[Model] Loading pre-trained model from: {model_path}")
+        model = PPO.load(
+            model_path,
+            env=env,
+            device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+            tensorboard_log=tensorboard_log_dir,
+        )
+        # Update learning rate for fine-tuning (optionally use smaller LR)
+        if phase == 2:
+            fine_tune_lr = config.lr * 0.1  # 10x smaller LR for fine-tuning
+            model.learning_rate = linear_schedule(fine_tune_lr)
+            print(f"[Model] Fine-tuning LR: {fine_tune_lr}")
+    else:
+        # Create new model from scratch
+        policy_kwargs = dict(
+            activation_fn=torch.nn.ReLU,
+            net_arch=dict(pi=config.net_arch, vf=config.net_arch),
+        )
+        model = PPO(
+            "MlpPolicy",
+            env,
+            ent_coef=config.ent_coef,
+            learning_rate=linear_schedule(config.lr),
+            verbose=1,
+            policy_kwargs=policy_kwargs,
+            n_steps=config.n_steps_per_update,
+            batch_size=config.batch_size,
+            n_epochs=config.n_epochs,
+            tensorboard_log=tensorboard_log_dir,
+            device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+        )
+
+    print(f"[Training] Starting Phase {phase} training for {config.n_steps_total} steps...")
     model.learn(
         total_timesteps=config.n_steps_total,
         progress_bar=True,
@@ -162,13 +254,14 @@ def train_ppo(root_path: str, use_wandb: bool = False):
 
     if SAVE_MODEL:
         model.save(model_dir)
+        print(f"[Model] Saved to: {model_dir}")
 
         # Log model as WandB artifact
         if config.use_wandb and wandb.run is not None:
             model_artifact = wandb.Artifact(
-                name=f"ppo-model-{run_name}",
+                name=f"ppo-model-phase{phase}-{run_name}",
                 type="model",
-                description=f"PPO handover model trained at {SIM_ID}",
+                description=f"PPO handover model Phase {phase} trained at {SIM_ID}",
             )
             model_artifact.add_file(f"{model_dir}.zip")
             wandb.log_artifact(model_artifact)

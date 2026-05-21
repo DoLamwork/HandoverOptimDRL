@@ -98,6 +98,13 @@ class HandoverEnvPPO(gym.Env):
         self._was_truncated = False
         self.truncated = False
 
+        # Lifetime event counters (persist across resets)
+        self.lifetime_rlf_count = 0
+        self.lifetime_pp_count = 0
+        self.lifetime_ho_prep_count = 0
+        self.lifetime_ho_exec_count = 0
+        self.lifetime_ho_completed_count = 0
+
         # Reset environment
         self.reset()
 
@@ -144,6 +151,21 @@ class HandoverEnvPPO(gym.Env):
         np.ndarray
             Initial observation.
         """
+        # Accumulate statistics from the completed episode before resetting
+        if hasattr(self, "ho_procedure") and self.ho_procedure is not None and len(self.ho_procedure.bs_idxs) > 0:
+            stats = self.ho_procedure.get_statistics(self.sinr_list[self.dataset_idx])
+            self.lifetime_rlf_count += stats["num_rlf"]
+            self.lifetime_pp_count += stats["num_pp"]
+            self.lifetime_ho_prep_count += stats["num_ho_prep_started"]
+            self.lifetime_ho_exec_count += stats["num_ho_exe_started"]
+            self.lifetime_ho_completed_count += stats["num_ho_exe_completed"]
+
+        # Cycle dataset if previous episode was truncated (completed successfully) during training
+        if not self.test_mode_on and self._was_truncated:
+            self.dataset_idx = (self.dataset_idx + 1) % self.n_datasets
+            self.time_steps, self.n_bs = self.rsrp_list[self.dataset_idx].shape
+        self._was_truncated = False
+
         # Observations, flags, etc.
         self.s_action = []
 
@@ -361,7 +383,7 @@ class HandoverEnvPPO(gym.Env):
 
         best_bs = np.argmax(sinr)
 
-        if self.s_pcell[-1] > 0:  # Connected
+        if self.s_pcell[-1] >= 0:  # Connected #>0 previous
             reward += sinr_norm[self.s_pcell[-1]].item()  # SINR-based reward
             if self.s_pcell[-1] == best_bs:  # Bonus for best BS
                 reward += self.config.rew_const

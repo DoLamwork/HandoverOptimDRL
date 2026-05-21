@@ -53,7 +53,7 @@ class Config:
     n_steps_per_update: int = 2000
     batch_size: int = 200
     n_epochs: int = 10
-    lr: float = 5e-5
+    lr: float = 3e-4
     ent_coef: float = 0.1
 
     # Environment parameters

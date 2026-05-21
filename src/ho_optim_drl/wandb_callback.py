@@ -122,17 +122,15 @@ class WandbTrainingCallback(BaseCallback):
                     "env/current_timestep": unwrapped.t,
                 }
 
-                # Count events from counters
+                # Count events from cumulative counters + active counters of current ongoing episode
                 if hasattr(ho, "cntr"):
                     env_metrics.update(
                         {
-                            "env/ho_prep_total": len(ho.cntr["ho_prep"].start_idxs),
-                            "env/ho_exec_total": len(ho.cntr["ho_exec"].start_idxs),
-                            "env/ho_completed_total": len(
-                                ho.cntr["ho_exec"].done_idxs
-                            ),
-                            "env/rlf_total": len(ho.cntr["rlfr"].start_idxs),
-                            "env/pp_total": len(ho.cntr["mtsc"].aborted_idxs),
+                            "env/ho_prep_total": getattr(unwrapped, "lifetime_ho_prep_count", 0) + len(ho.cntr["ho_prep"].start_idxs),
+                            "env/ho_exec_total": getattr(unwrapped, "lifetime_ho_exec_count", 0) + len(ho.cntr["ho_exec"].start_idxs),
+                            "env/ho_completed_total": getattr(unwrapped, "lifetime_ho_completed_count", 0) + len(ho.cntr["ho_exec"].done_idxs),
+                            "env/rlf_total": getattr(unwrapped, "lifetime_rlf_count", 0) + len(ho.cntr["rlfr"].start_idxs),
+                            "env/pp_total": getattr(unwrapped, "lifetime_pp_count", 0) + len(ho.cntr["mtsc"].aborted_idxs),
                         }
                     )
 
