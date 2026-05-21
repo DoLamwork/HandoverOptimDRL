@@ -61,15 +61,17 @@ You are now ready to use the HandoverOptimDRL framework for your projects.
 ### Train a New PPO Agent
 1. **Train a PPO agent**:
    # Phase 1:  Học HO strategy
+   ```bash
     python -m run train_ppo --phase 1 --wandb
-
+    ```
     terminate_on_rlf = True     ← RLF → episode chết (phạt nặng, buộc phải HO kịp thời)
     terminate_on_pp  = False    ← PP không kill episode (tự do HO mà không sợ chết)
     permit_ho_prep_abort = True ← Có thể abort HO prep (giữ nguyên config gốc)
 
     # Phase 2 (load model Phase 1)
+    ```bash
     python -m run train_ppo --phase 2 --load-model results/models/ppo_sweep/<tên_run> --wandb
-
+    ```
     terminate_on_rlf = True     ← Giữ nguyên
     terminate_on_pp  = True     ← PP → episode chết (phạt HO liên tục)
     permit_ho_prep_abort = True ← Giữ nguyên
