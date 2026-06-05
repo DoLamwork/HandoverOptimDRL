@@ -99,21 +99,25 @@ def train_ppo(
     # --- Curriculum Learning ---
     if phase == 1:
         # Phase 1: Episodes terminate only on RLF or max timesteps.
-        # Disable HO prep abort so handovers always complete — gives
-        # the agent a real learning signal.
+        # Custom experiment: permit_ho_prep_abort=True, t_ho_prep=3.
+        # Allows aborting but makes handovers easier by reducing prep time.
         config.terminate_on_rlf = True
         config.terminate_on_pp = False
-        config.permit_ho_prep_abort = False
-        print("[Curriculum] Phase 1: abort=False, terminate_on_pp=False")
-        print("[Curriculum] Agent learns optimal HO strategies.")
+        config.permit_ho_prep_abort = True
+        config.t_ho_prep = 2
+        config.cycle_on_reset = False
+        print("[Curriculum] Phase 1: abort=True, t_ho_prep=3, terminate_on_pp=False, cycle_on_reset=False")
+        print("[Curriculum] Agent learns HO with shorter prep time on the same dataset until completion.")
     elif phase == 2:
         # Phase 2: Episodes also terminate on PP events.
-        # Introduces penalty for excessive HOs, encouraging
-        # more stable connections.
+        # Restores real 3GPP parameters: permit_ho_prep_abort=True, t_ho_prep=5.
         config.terminate_on_rlf = True
         config.terminate_on_pp = True
-        print("[Curriculum] Phase 2: terminate_on_rlf=True, terminate_on_pp=True")
-        print("[Curriculum] Agent learns to avoid excessive HOs.")
+        config.permit_ho_prep_abort = True
+        config.t_ho_prep = 5
+        config.cycle_on_reset = True
+        print("[Curriculum] Phase 2: abort=True, t_ho_prep=5, terminate_on_rlf=True, terminate_on_pp=True, cycle_on_reset=True")
+        print("[Curriculum] Agent learns to avoid excessive HOs with standard 3GPP prep time and dataset cycling.")
         if load_model is None:
             print("[WARNING] Phase 2 without --load-model: training from scratch.")
     else:

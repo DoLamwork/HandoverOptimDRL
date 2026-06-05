@@ -31,6 +31,27 @@ Hiện tại, kết quả validate của model cũ ở cả PPO và 3GPP đều 
 - với file data mới, model train ra lại có kết quả validate PPO rất tệ, trong khi kết quả validate 3GPP vẫn ổn. Tôi muốn làm rõ vấn đề này
 - Liệu có thể gen ra bộ data lớn hơn để tự train và dựa vào validate PPO để tự validate bộ data mới
 
+## Analysis: Why PPO fails on new_data
+1. **Distribution Shift**: PPO overfits to the SINR/RSRP patterns of `processed/`. `new_data` likely has different path loss, shadowing, or mobility profiles.
+2. **Observation Gap**: The code only provides SINR to the agent. The paper likely uses both RSRP and SINR. Without RSRP, the agent lacks critical signal strength context.
+3. **Reward Sensitivity**: The reward function relies on normalized SINR. If the range of SINR in `new_data` differs from `processed/`, the reward signal shifts.
+4. **Narrow Training Range**: The current code only uses [30, 50] km/h, making it fragile to other speeds in `new_data`.
+
+## Detailed Flow Comparison: Paper vs Code
+
+| Step | Paper's Theoretical Flow | Code's Actual Implementation | Difference/Impact |
+| :--- | :--- | :--- | :--- |
+| **Observation** | $\text{RSRP}_{\text{all}}, \text{SINR}_{\text{all}}, \text{Cell ID}, \text{State}$ | $\text{SINR}_{\text{norm-all}}, \text{Serving Cell}, \text{MTS Flag}$ | **High**: Missing RSRP $\rightarrow$ blind to coverage strength. |
+| **Decision** | Agent decides **whether** to trigger HO | Agent selects `target_cell`. If $\neq$ current, HO starts. | **Low**: Mathematically equivalent. |
+| **Trigger** | Direct trigger based on policy | Agent $\rightarrow$ `ho_prep` (50 steps) $\rightarrow$ `ho_exec` (40 steps) | **Medium**: 90-step latency requires a predictive policy. |
+| **Execution** | RRC state machine | Deterministic 3GPP state machine ($\text{N310} \rightarrow \text{T310} \rightarrow \text{RLF}$) | **Low**: Implementation is accurate to 3GPP. |
+| **Reward** | Focus on Spectral Efficiency | Proxy: $\text{SINR}_{\text{norm}} + \text{Best-cell bonus} - \text{Penalties}$ | **Medium**: Optimizing for SINR, not directly for efficiency. |
+
+### Alignment Roadmap
+1. **Observation Sync**: Add normalized RSRP to `HandoverEnvPPO` observations.
+2. **Temporal Alignment**: Review $t_{ho\_prep}$ and $t_{ho\_exec}$ relative to UE speed.
+3. **Reward Refinement**: Integrate actual Spectral Efficiency into the reward signal.
+
 # PPO Implementation Details
 
 ## 1. PPO Algorithm Configuration
@@ -158,12 +179,11 @@ if out_of_sync (n310 or t310 pending):
 6. WandB init if enabled
 7. Create PPO model with config
 8. model.learn(total_timesteps=5e6)
-9. SAVE MODEL BEFORE LEARNING (BUG! line 141-142)
-
+9.  save model 
 10. WandB finish
 ```
 
-**Critical Bug**: `model.save()` is called **before** `model.learn()`. The saved model is **randomly initialized**, not trained!
+
 
 ## 6. Metrics Tracked
 
@@ -191,36 +211,6 @@ Saved to CSV: `results/metrics/ppo_metrics.csv`
 - `s_pcell`, `s_tcell`: serving/target cell indices
 - `sinr_timeline`, `rsrp_timeline`: SINR/RSRP of connected cell
 - `sinr_at_ho_exe_pcell`, `sinr_after_ho_exe_tcell`: pre/post HO SINR
-
-## 7. Critical Issues Found
-### Issue 3: Model Path Hardcoded in Validation
-`validate_ppo.py` loads from fixed path `results/models/ppo_model/model` regardless of:
-- Which run trained it (WandB or not)
-- Whether it was actually trained
-
-**Fix**: Store model with run name and pass model path explicitly or use latest run directory.
-
-### Issue 4: No Data Provenance
-No logging of:
-- Which data files used for training
-- Git commit hash
-- Exact hyperparameters
-- Random seeds
-
-**Fix**: Save `metadata.json` alongside model with all training config and data file list.
-
-### Issue 5: Minimal Hyperparameter Sweep
-Only `ent_coef` and `rew_const` are tuned. Other critical parameters fixed:
-- `lr`, `n_steps`, `batch_size`, `n_epochs`
-- `net_arch` depth/width
-- `clip_range` (default 0.2, not tuned)
-
-For new data, these may need adjustment.
-
-## 8. Why PPO Fails on New Data But 3GPP Succeeds
-
-### 3GPP Protocol
-Rule-based, deterministic. Uses same mathematical thresholds (Q_in, Q_out, A3 hysteresis, TTT) regardless of data. As long as SINR/RSRP are physically valid (not pathological), 3GPP will produce reasonable, stable results.
 
 ### PPO Policy
 Learns a mapping from observations to actions. It **overfits** to the specific patterns in the training data (processed data). New data may have:
@@ -250,26 +240,6 @@ L3 filtering (w=0.1) smooths data, but if new_data has:
 
 The observation statistics (mean, std of SINR across all BSs) change, causing the policy to fail.
 
-## 9. Recommendations
-
-### Immediate Fixes
-1. **Fix model saving**: Move `model.save()` after `model.learn()`
-2. **Align speeds**: Train on [30, 50, 70, 90] or validate only on [30, 50]
-3. **Log metadata**: Save config, data file names, git commit to `metadata.json`
-4. **Use run-specific model paths**: `results/models/{sweep_name}/{run_name}/`
-
-### For New Data Adaptation
-1. **Retrain from scratch** on new_data with full speed range
-2. **Expand hyperparameter sweep**:
-   - Learning rate: [1e-5, 5e-5, 1e-4]
-   - Rew_const: [0.5, 0.75, 1.0, 1.5]
-   - Ent_coef: [0.001, 0.01, 0.1, 0.3]
-   - Network architecture: [[64,64], [128,128], [64,128,64]]
-   - n_steps: [1024, 2048, 4096]
-   - Batch size: [64, 128, 256, 512]
-3. **Increase training steps**: 5M might be insufficient for complex data; try 10-20M
-4. **Normalize reward**: Consider reward scaling (SB3 `normalize_advantage=True`)
-5. **Data augmentation**: If new_data small, upsample or add noise to increase diversity
 
 ### Validation Strategy
 1. Compare PPO vs 3GPP on SAME datasets (same speed splits)
@@ -278,13 +248,6 @@ The observation statistics (mean, std of SINR across all BSs) change, causing th
    - Compare distributions: mean/std of SINR across datasets
    - Run PPO in test mode (no early termination) to collect full trajectories
    - Visualize actions vs ground truth best BS: accuracy metric
-
-### Generate Larger Dataset
-Yes, generating a larger dataset with varied speeds (10-120 km/h) and scenarios (urban, suburban, rural) will improve PPO generalization. Use the same data generation pipeline that produced `processed/` but with more samples. Then:
-- Split by speeds (not random) to test generalization
-- Use 80% train, 20% validation (stratified by speed)
-- Train PPO on full train set
-- Validate on held-out speeds to assess robustness
 
 ## 10. Code References
 

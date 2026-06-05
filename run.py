@@ -45,8 +45,8 @@ def run() -> int:
         help="Train a PPO policy for handover decisions",
         description="Trains a PPO policy to make optimal handover decisions.\n\n"
         "Curriculum Learning:\n"
-        "  Phase 1: Train with permit_ho_prep_abort=False (learn basics)\n"
-        "  Phase 2: Fine-tune with permit_ho_prep_abort=True (learn abort)\n\n"
+        "  Phase 1: Train with permit_ho_prep_abort=True, t_ho_prep=3 (shorter prep time)\n"
+        "  Phase 2: Fine-tune with permit_ho_prep_abort=True, t_ho_prep=5 (standard 3GPP)\n\n"
         "Example workflow:\n"
         "  python -m run train_ppo --phase 1 --wandb\n"
         "  python -m run train_ppo --phase 2 --load-model results/models/.../model --wandb",
@@ -70,8 +70,8 @@ def run() -> int:
         default=1,
         choices=[1, 2],
         help="Curriculum learning phase (default: 1).\n"
-        "  1: Train with HO prep abort disabled (learn basics)\n"
-        "  2: Fine-tune with HO prep abort enabled (learn when to abort)",
+        "  1: Train with HO prep abort enabled and t_ho_prep=3\n"
+        "  2: Fine-tune with HO prep abort enabled and t_ho_prep=5",
     )
     train_parser.add_argument(
         "--load-model",

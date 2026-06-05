@@ -104,6 +104,7 @@ class HandoverEnvPPO(gym.Env):
         self.lifetime_ho_prep_count = 0
         self.lifetime_ho_exec_count = 0
         self.lifetime_ho_completed_count = 0
+        self.episode_survival_rates = []  # Track rolling survival rate percentage
 
         # Reset environment
         self.reset()
@@ -159,11 +160,19 @@ class HandoverEnvPPO(gym.Env):
             self.lifetime_ho_prep_count += stats["num_ho_prep_started"]
             self.lifetime_ho_exec_count += stats["num_ho_exe_started"]
             self.lifetime_ho_completed_count += stats["num_ho_exe_completed"]
+            
+            # Record rolling episode survival rate percentage
+            survival_pct = (self.t / self.time_steps) * 100.0
+            self.episode_survival_rates.append(survival_pct)
+            if len(self.episode_survival_rates) > 100:
+                self.episode_survival_rates.pop(0)
 
-        # Cycle dataset if previous episode was truncated (completed successfully) during training
-        if not self.test_mode_on and self._was_truncated:
-            self.dataset_idx = (self.dataset_idx + 1) % self.n_datasets
-            self.time_steps, self.n_bs = self.rsrp_list[self.dataset_idx].shape
+        # Cycle dataset according to config: either on every reset or only on truncation
+        if not self.test_mode_on:
+            should_cycle = getattr(self.config, "cycle_on_reset", True) or self._was_truncated
+            if should_cycle:
+                self.dataset_idx = (self.dataset_idx + 1) % self.n_datasets
+                self.time_steps, self.n_bs = self.rsrp_list[self.dataset_idx].shape
         self._was_truncated = False
 
         # Observations, flags, etc.

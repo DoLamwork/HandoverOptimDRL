@@ -53,14 +53,15 @@ class Config:
     n_steps_per_update: int = 2000
     batch_size: int = 200
     n_epochs: int = 10
-    lr: float = 3e-4
-    ent_coef: float = 0.1
+    lr: float = 3e-4       # Sửa từ 5e-5 thành 3e-4
+    ent_coef: float = 0.03 # Sửa từ 0.1 thành 0.01 (hoặc 0.02)
 
     # Environment parameters
     terminate_on_pp: bool = True  # Terminate episode on ping-pong
     terminate_on_rlf: bool = True  # Terminate episode on RLF
     test_deterministic_actions: bool = True  # Test with deterministic actions
     permit_ho_prep_abort: bool = True  # Permit HO preparation abort
+    cycle_on_reset: bool = True  # Cycle dataset on every reset (otherwise only on truncation)
 
     def update(self, config_dict: dict):
         """
