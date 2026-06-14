@@ -106,8 +106,9 @@ def train_ppo(
         config.permit_ho_prep_abort = True
         config.t_ho_prep = 2
         config.cycle_on_reset = False
+        config.continue_after_failure = True
         print("[Curriculum] Phase 1: abort=True, t_ho_prep=3, terminate_on_pp=False, cycle_on_reset=False")
-        print("[Curriculum] Agent learns HO with shorter prep time on the same dataset until completion.")
+        print("[Curriculum] After failure, the next episode starts at failure timestep + 1.")
     elif phase == 2:
         # Phase 2: Episodes also terminate on PP events.
         # Restores real 3GPP parameters: permit_ho_prep_abort=True, t_ho_prep=5.
@@ -116,8 +117,9 @@ def train_ppo(
         config.permit_ho_prep_abort = True
         config.t_ho_prep = 5
         config.cycle_on_reset = True
+        config.continue_after_failure = True
         print("[Curriculum] Phase 2: abort=True, t_ho_prep=5, terminate_on_rlf=True, terminate_on_pp=True, cycle_on_reset=True")
-        print("[Curriculum] Agent learns to avoid excessive HOs with standard 3GPP prep time and dataset cycling.")
+        print("[Curriculum] After failure, the next episode starts at failure timestep + 1.")
         if load_model is None:
             print("[WARNING] Phase 2 without --load-model: training from scratch.")
     else:

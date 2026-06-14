@@ -97,6 +97,7 @@ class HandoverEnvPPO(gym.Env):
         # Dataset cycling flag
         self._was_truncated = False
         self.truncated = False
+        self.continuation_reset_count = 0
 
         # Lifetime event counters (persist across resets)
         self.lifetime_rlf_count = 0
@@ -167,12 +168,26 @@ class HandoverEnvPPO(gym.Env):
             if len(self.episode_survival_rates) > 100:
                 self.episode_survival_rates.pop(0)
 
-        # Cycle dataset according to config: either on every reset or only on truncation
+        continue_from_failure = (
+            not self.test_mode_on
+            and self.config.continue_after_failure
+            and self.terminated
+            and not self._was_truncated
+            and self.t < self.time_steps - 1
+        )
+
+        # Cycle dataset according to config: either on every reset or only on truncation.
         if not self.test_mode_on:
-            should_cycle = getattr(self.config, "cycle_on_reset", True) or self._was_truncated
-            if should_cycle:
-                self.dataset_idx = (self.dataset_idx + 1) % self.n_datasets
-                self.time_steps, self.n_bs = self.rsrp_list[self.dataset_idx].shape
+            if continue_from_failure:
+                self.continuation_reset_count += 1
+            else:
+                should_cycle = (
+                    getattr(self.config, "cycle_on_reset", True)
+                    or self._was_truncated
+                )
+                if should_cycle:
+                    self.dataset_idx = (self.dataset_idx + 1) % self.n_datasets
+                    self.time_steps, self.n_bs = self.rsrp_list[self.dataset_idx].shape
         self._was_truncated = False
 
         # Observations, flags, etc.
@@ -207,7 +222,8 @@ class HandoverEnvPPO(gym.Env):
         self.s_rel_mtsc_cnt = []
 
         # General state
-        self.t = 0
+        if not continue_from_failure:
+            self.t = 0
         self.terminated = False
         self.truncated = False
 

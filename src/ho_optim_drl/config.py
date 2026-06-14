@@ -62,6 +62,7 @@ class Config:
     test_deterministic_actions: bool = True  # Test with deterministic actions
     permit_ho_prep_abort: bool = True  # Permit HO preparation abort
     cycle_on_reset: bool = True  # Cycle dataset on every reset (otherwise only on truncation)
+    continue_after_failure: bool = False  # Start the next episode at failure timestep + 1
 
     def update(self, config_dict: dict):
         """

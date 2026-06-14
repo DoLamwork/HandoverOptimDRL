@@ -120,6 +120,9 @@ class WandbTrainingCallback(BaseCallback):
                 env_metrics = {
                     "env/current_dataset_idx": unwrapped.dataset_idx,
                     "env/current_timestep": unwrapped.t,
+                    "env/continuation_reset_count": getattr(
+                        unwrapped, "continuation_reset_count", 0
+                    ),
                     "env/survival_rate_pct_mean": np.mean(unwrapped.episode_survival_rates) if getattr(unwrapped, "episode_survival_rates", None) else 0.0,
                 }
 
