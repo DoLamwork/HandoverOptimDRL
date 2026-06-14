@@ -53,6 +53,12 @@ class HandoverEnvPPO(gym.Env):
         self.dataset_idx: int = 0
         self.time_steps, self.n_bs = rsrp_list[0].shape
         self.t = 0
+        self.episode_start_t = 0
+        self.episode_end_t = self.time_steps - 1
+        self.episode_sampling_source = "full_trace"
+        self.failure_regions: list[tuple[int, int, str]] = []
+        self.random_window_count = 0
+        self.failure_window_count = 0
 
         # Observation space
         self.n_observations = 2 * self.n_bs + 1
@@ -143,7 +149,7 @@ class HandoverEnvPPO(gym.Env):
         Parameters
         ----------
         seed : int, optional
-            Random seed, by default None (not used).
+            Random seed used by the episode-window sampler, by default None.
         options : dict, optional
             Options for the reset, by default None (not used).
 
@@ -153,32 +159,45 @@ class HandoverEnvPPO(gym.Env):
             Initial observation.
         """
         # Accumulate statistics from the completed episode before resetting
-        if hasattr(self, "ho_procedure") and self.ho_procedure is not None and len(self.ho_procedure.bs_idxs) > 0:
-            stats = self.ho_procedure.get_statistics(self.sinr_list[self.dataset_idx])
-            self.lifetime_rlf_count += stats["num_rlf"]
-            self.lifetime_pp_count += stats["num_pp"]
-            self.lifetime_ho_prep_count += stats["num_ho_prep_started"]
-            self.lifetime_ho_exec_count += stats["num_ho_exe_started"]
-            self.lifetime_ho_completed_count += stats["num_ho_exe_completed"]
-            
+        if (
+            hasattr(self, "ho_procedure")
+            and self.ho_procedure is not None
+            and len(self.ho_procedure.bs_idxs) > 0
+        ):
+            counters = self.ho_procedure.cntr
+            self.lifetime_rlf_count += len(counters["rlfr"].start_idxs)
+            self.lifetime_pp_count += len(counters["mtsc"].aborted_idxs)
+            self.lifetime_ho_prep_count += len(counters["ho_prep"].start_idxs)
+            self.lifetime_ho_exec_count += len(counters["ho_exec"].start_idxs)
+            self.lifetime_ho_completed_count += len(counters["ho_exec"].done_idxs)
+
             # Record rolling episode survival rate percentage
-            survival_pct = (self.t / self.time_steps) * 100.0
+            episode_length = max(1, self.episode_end_t - self.episode_start_t)
+            survived_steps = min(self.t, self.episode_end_t) - self.episode_start_t
+            survival_pct = (survived_steps / episode_length) * 100.0
             self.episode_survival_rates.append(survival_pct)
             if len(self.episode_survival_rates) > 100:
                 self.episode_survival_rates.pop(0)
 
-        # Cycle dataset according to config: either on every reset or only on truncation
+        super().reset(seed=seed)
+
+        # Select the data covered by the next episode.
         if not self.test_mode_on:
-            should_cycle = getattr(self.config, "cycle_on_reset", True) or self._was_truncated
-            if should_cycle:
-                self.dataset_idx = (self.dataset_idx + 1) % self.n_datasets
-                self.time_steps, self.n_bs = self.rsrp_list[self.dataset_idx].shape
+            if self.config.random_window_reset:
+                self._sample_training_window()
+            else:
+                should_cycle = (
+                    getattr(self.config, "cycle_on_reset", True) or self._was_truncated
+                )
+                if should_cycle:
+                    self.dataset_idx = (self.dataset_idx + 1) % self.n_datasets
+                self._set_episode_bounds(start_t=0)
+        else:
+            self._set_episode_bounds(start_t=0, full_trace=True)
         self._was_truncated = False
 
         # Observations, flags, etc.
         self.s_action = []
-
-        super().reset()
 
         # RSRP and SINR values
         self.s_rsrp = []
@@ -207,7 +226,6 @@ class HandoverEnvPPO(gym.Env):
         self.s_rel_mtsc_cnt = []
 
         # General state
-        self.t = 0
         self.terminated = False
         self.truncated = False
 
@@ -216,6 +234,82 @@ class HandoverEnvPPO(gym.Env):
 
         # Return the initial observation
         return self._get_initial_observation()
+
+    def _sample_training_window(self) -> None:
+        """Select a random trace window, optionally replaying a known failure region."""
+        if self.config.episode_window_steps < 1:
+            raise ValueError("episode_window_steps must be at least 1.")
+        if not 0.0 <= self.config.failure_sampling_probability <= 1.0:
+            raise ValueError("failure_sampling_probability must be between 0 and 1.")
+        if self.config.failure_lookback_min < 1:
+            raise ValueError("failure_lookback_min must be at least 1.")
+        if self.config.failure_lookback_max < self.config.failure_lookback_min:
+            raise ValueError(
+                "failure_lookback_max must be greater than or equal to "
+                "failure_lookback_min."
+            )
+
+        replay_failure = (
+            bool(self.failure_regions)
+            and self.np_random.random() < self.config.failure_sampling_probability
+        )
+
+        if replay_failure:
+            region_idx = int(self.np_random.integers(len(self.failure_regions)))
+            self.dataset_idx, failure_t, event_type = self.failure_regions[region_idx]
+            lookback_max = min(
+                self.config.failure_lookback_max,
+                max(1, self.config.episode_window_steps - 1),
+            )
+            lookback_min = min(self.config.failure_lookback_min, lookback_max)
+            lookback = int(self.np_random.integers(lookback_min, lookback_max + 1))
+            start_t = max(0, failure_t - lookback)
+            self.episode_sampling_source = f"failure_{event_type}"
+            self.failure_window_count += 1
+        else:
+            self.dataset_idx = int(self.np_random.integers(self.n_datasets))
+            dataset_steps = self.rsrp_list[self.dataset_idx].shape[0]
+            max_start = max(0, dataset_steps - self.config.episode_window_steps - 1)
+            start_t = int(self.np_random.integers(max_start + 1))
+            self.episode_sampling_source = "random"
+            self.random_window_count += 1
+
+        self._set_episode_bounds(start_t=start_t)
+
+    def _set_episode_bounds(self, start_t: int, full_trace: bool = False) -> None:
+        """Set the active dataset shape and absolute trace bounds for an episode."""
+        self.time_steps, dataset_n_bs = self.rsrp_list[self.dataset_idx].shape
+        if self.time_steps < 2:
+            raise ValueError(
+                f"Dataset {self.dataset_idx} must contain at least two timesteps."
+            )
+        if dataset_n_bs != self.n_bs:
+            raise ValueError(
+                "All datasets must contain the same number of base stations. "
+                f"Expected {self.n_bs}, got {dataset_n_bs} for dataset {self.dataset_idx}."
+            )
+
+        self.episode_start_t = min(max(0, start_t), self.time_steps - 2)
+        self.t = self.episode_start_t
+        if full_trace:
+            self.episode_end_t = self.time_steps - 1
+            self.episode_sampling_source = "full_trace"
+        else:
+            self.episode_end_t = min(
+                self.episode_start_t + self.config.episode_window_steps,
+                self.time_steps - 1,
+            )
+
+    def _record_failure_region(self, event_type: str) -> None:
+        """Store an absolute trace location for prioritized replay on later resets."""
+        if self.test_mode_on:
+            return
+        region = (self.dataset_idx, self.t, event_type)
+        if self.failure_regions and self.failure_regions[-1] == region:
+            return
+        self.failure_regions.append(region)
+        if len(self.failure_regions) > self.config.max_failure_regions:
+            self.failure_regions.pop(0)
 
     def _get_initial_observation(self) -> tuple[np.ndarray, dict[str, Any]]:
         """
@@ -253,7 +347,13 @@ class HandoverEnvPPO(gym.Env):
         s_pp_indicator = np.array([0])
         self.state = np.concatenate((s_pcell_indicator, input_sinr, s_pp_indicator))
 
-        return np.array(self.state, dtype=np.float32), {}
+        return np.array(self.state, dtype=np.float32), {
+            "dataset_idx": self.dataset_idx,
+            "episode_start_t": self.episode_start_t,
+            "episode_end_t": self.episode_end_t,
+            "sampling_source": self.episode_sampling_source,
+            "failure_region_count": len(self.failure_regions),
+        }
 
     def step(
         self, action: int | np.ndarray
@@ -275,6 +375,11 @@ class HandoverEnvPPO(gym.Env):
         # Get the reward
         reward = self._get_reward()
 
+        if raw_obs["rlf"]:
+            self._record_failure_region("rlf")
+        if raw_obs["pp"]:
+            self._record_failure_region("pp")
+
         # Terminate episode if RLF flag is set
         if self.terminate_on_rlf and raw_obs["rlf"]:
             self.terminated = True
@@ -283,10 +388,10 @@ class HandoverEnvPPO(gym.Env):
         if self.terminate_on_pp and raw_obs["pp"]:
             self.terminated = True
 
-        # Truncate episode if max episode length is reached
-        if 1 + self.t == self.time_steps - 1:
+        # Truncate episode at the end of its sampled window or trace.
+        if self.t + 1 >= self.episode_end_t:
             self.truncated = True
-            self._was_truncated = True  # Mark for dataset cycling on reset
+            self._was_truncated = True
 
         self.t += 1
 
@@ -304,7 +409,13 @@ class HandoverEnvPPO(gym.Env):
             reward,
             self.terminated,
             self.truncated,
-            {"sinr_lin": 0},
+            {
+                "sinr_lin": 0,
+                "dataset_idx": self.dataset_idx,
+                "trace_t": self.t,
+                "episode_start_t": self.episode_start_t,
+                "sampling_source": self.episode_sampling_source,
+            },
         )
 
     def _validate_state_action(self, action: int):
@@ -413,7 +524,6 @@ class HandoverEnvPPO(gym.Env):
     def set_dataset_idx(self, dataset_idx):
         """Set the dataset index."""
         self.dataset_idx = dataset_idx
-        self.time_steps, self.n_bs = self.rsrp_list[dataset_idx].shape
         self.reset()
 
     def render(self, mode="human"):

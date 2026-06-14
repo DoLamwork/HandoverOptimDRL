@@ -62,6 +62,12 @@ class Config:
     test_deterministic_actions: bool = True  # Test with deterministic actions
     permit_ho_prep_abort: bool = True  # Permit HO preparation abort
     cycle_on_reset: bool = True  # Cycle dataset on every reset (otherwise only on truncation)
+    random_window_reset: bool = False  # Sample training episodes from random trace windows
+    episode_window_steps: int = 1_000  # Maximum number of actions in a training episode
+    failure_sampling_probability: float = 0.3  # Replay windows before known failures
+    failure_lookback_min: int = 100  # Minimum steps before a replayed failure
+    failure_lookback_max: int = 300  # Maximum steps before a replayed failure
+    max_failure_regions: int = 2_000  # Maximum stored RLF/PP locations
 
     def update(self, config_dict: dict):
         """

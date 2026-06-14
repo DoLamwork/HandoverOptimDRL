@@ -53,8 +53,8 @@ def main(
         Whether to use WandB logging.
     phase : int
         Curriculum learning phase:
-        - Phase 1: Train with permit_ho_prep_abort=False (agent learns basics)
-        - Phase 2: Fine-tune with permit_ho_prep_abort=True (agent learns abort)
+        - Phase 1: Short HO preparation and no termination on ping-pong
+        - Phase 2: Standard HO preparation and termination on ping-pong
     load_model : str or None
         Path to a pre-trained model to continue training from (for Phase 2).
     """
@@ -87,7 +87,7 @@ def train_ppo(
     use_wandb : bool
         Whether to use WandB logging.
     phase : int
-        Curriculum phase (1 = no abort, 2 = with abort).
+        Curriculum phase (1 = short preparation, 2 = standard preparation).
     load_model : str or None
         Path to pre-trained model (.zip) to load for fine-tuning.
     """
@@ -104,10 +104,11 @@ def train_ppo(
         config.terminate_on_rlf = True
         config.terminate_on_pp = False
         config.permit_ho_prep_abort = True
-        config.t_ho_prep = 2
+        config.t_ho_prep = 3
         config.cycle_on_reset = False
-        print("[Curriculum] Phase 1: abort=True, t_ho_prep=3, terminate_on_pp=False, cycle_on_reset=False")
-        print("[Curriculum] Agent learns HO with shorter prep time on the same dataset until completion.")
+        config.random_window_reset = True
+        print("[Curriculum] Phase 1: abort=True, t_ho_prep=3, terminate_on_pp=False")
+        print("[Curriculum] Training uses random trace windows with prioritized failure replay.")
     elif phase == 2:
         # Phase 2: Episodes also terminate on PP events.
         # Restores real 3GPP parameters: permit_ho_prep_abort=True, t_ho_prep=5.
@@ -116,12 +117,20 @@ def train_ppo(
         config.permit_ho_prep_abort = True
         config.t_ho_prep = 5
         config.cycle_on_reset = True
-        print("[Curriculum] Phase 2: abort=True, t_ho_prep=5, terminate_on_rlf=True, terminate_on_pp=True, cycle_on_reset=True")
-        print("[Curriculum] Agent learns to avoid excessive HOs with standard 3GPP prep time and dataset cycling.")
+        config.random_window_reset = True
+        print("[Curriculum] Phase 2: abort=True, t_ho_prep=5, terminate_on_rlf=True, terminate_on_pp=True")
+        print("[Curriculum] Training uses random trace windows with prioritized failure replay.")
         if load_model is None:
             print("[WARNING] Phase 2 without --load-model: training from scratch.")
     else:
         raise ValueError(f"Invalid curriculum phase: {phase}. Use 1 or 2.")
+
+    print(
+        "[Sampler] "
+        f"window={config.episode_window_steps} steps, "
+        f"failure_replay={config.failure_sampling_probability:.0%}, "
+        f"lookback={config.failure_lookback_min}-{config.failure_lookback_max} steps"
+    )
 
     # Load MATLAB files
     data_dir = os.path.join(root_path, "data", "processed")

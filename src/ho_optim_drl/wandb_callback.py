@@ -120,7 +120,23 @@ class WandbTrainingCallback(BaseCallback):
                 env_metrics = {
                     "env/current_dataset_idx": unwrapped.dataset_idx,
                     "env/current_timestep": unwrapped.t,
-                    "env/survival_rate_pct_mean": np.mean(unwrapped.episode_survival_rates) if getattr(unwrapped, "episode_survival_rates", None) else 0.0,
+                    "env/current_episode_start_t": getattr(
+                        unwrapped, "episode_start_t", 0
+                    ),
+                    "env/failure_region_count": len(
+                        getattr(unwrapped, "failure_regions", [])
+                    ),
+                    "env/random_window_count": getattr(
+                        unwrapped, "random_window_count", 0
+                    ),
+                    "env/failure_window_count": getattr(
+                        unwrapped, "failure_window_count", 0
+                    ),
+                    "env/survival_rate_pct_mean": (
+                        np.mean(unwrapped.episode_survival_rates)
+                        if getattr(unwrapped, "episode_survival_rates", None)
+                        else 0.0
+                    ),
                 }
 
                 # Count events from cumulative counters + active counters of current ongoing episode
