@@ -1,0 +1,3 @@
+[mcp_servers.pdf-reader]
+command = "npx"
+args = ["@shtse8/pdf-reader-mcp"]
