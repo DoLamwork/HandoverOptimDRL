@@ -128,11 +128,51 @@ class WandbTrainingCallback(BaseCallback):
 
                 # Count events from cumulative counters + active counters of current ongoing episode
                 if hasattr(ho, "cntr"):
+                    ho_prep_total = getattr(
+                        unwrapped, "lifetime_ho_prep_count", 0
+                    ) + len(ho.cntr["ho_prep"].start_idxs)
+                    ho_prep_aborted_total = getattr(
+                        unwrapped, "lifetime_ho_prep_aborted_count", 0
+                    ) + len(ho.cntr["ho_prep"].aborted_idxs)
+                    ho_prep_failed_total = getattr(
+                        unwrapped, "lifetime_ho_prep_failed_count", 0
+                    ) + len(ho.cntr["ho_prep"].failed_idxs)
+                    ho_exec_total = getattr(
+                        unwrapped, "lifetime_ho_exec_count", 0
+                    ) + len(ho.cntr["ho_exec"].start_idxs)
+                    ho_exec_aborted_total = getattr(
+                        unwrapped, "lifetime_ho_exec_aborted_count", 0
+                    ) + len(ho.cntr["ho_exec"].aborted_idxs)
+                    ho_exec_failed_total = getattr(
+                        unwrapped, "lifetime_ho_exec_failed_count", 0
+                    ) + len(ho.cntr["ho_exec"].failed_idxs)
+                    ho_completed_total = getattr(
+                        unwrapped, "lifetime_ho_completed_count", 0
+                    ) + len(ho.cntr["ho_exec"].done_idxs)
                     env_metrics.update(
                         {
-                            "env/ho_prep_total": getattr(unwrapped, "lifetime_ho_prep_count", 0) + len(ho.cntr["ho_prep"].start_idxs),
-                            "env/ho_exec_total": getattr(unwrapped, "lifetime_ho_exec_count", 0) + len(ho.cntr["ho_exec"].start_idxs),
-                            "env/ho_completed_total": getattr(unwrapped, "lifetime_ho_completed_count", 0) + len(ho.cntr["ho_exec"].done_idxs),
+                            "env/ho_prep_total": ho_prep_total,
+                            "env/ho_prep_aborted_total": ho_prep_aborted_total,
+                            "env/ho_prep_failed_total": ho_prep_failed_total,
+                            "env/ho_exec_total": ho_exec_total,
+                            "env/ho_exec_aborted_total": ho_exec_aborted_total,
+                            "env/ho_exec_failed_total": ho_exec_failed_total,
+                            "env/ho_completed_total": ho_completed_total,
+                            "env/ho_prep_to_exec_pct": (
+                                100.0 * ho_exec_total / ho_prep_total
+                                if ho_prep_total > 0
+                                else 0.0
+                            ),
+                            "env/ho_prep_abort_pct": (
+                                100.0 * ho_prep_aborted_total / ho_prep_total
+                                if ho_prep_total > 0
+                                else 0.0
+                            ),
+                            "env/ho_exec_completion_pct": (
+                                100.0 * ho_completed_total / ho_exec_total
+                                if ho_exec_total > 0
+                                else 0.0
+                            ),
                             "env/rlf_total": getattr(unwrapped, "lifetime_rlf_count", 0) + len(ho.cntr["rlfr"].start_idxs),
                             "env/pp_total": getattr(unwrapped, "lifetime_pp_count", 0) + len(ho.cntr["mtsc"].aborted_idxs),
                         }

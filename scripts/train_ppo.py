@@ -107,7 +107,11 @@ def train_ppo(
         config.t_ho_prep = 2
         config.cycle_on_reset = False
         config.continue_after_failure = True
-        print("[Curriculum] Phase 1: abort=True, t_ho_prep=3, terminate_on_pp=False, cycle_on_reset=False")
+        print(
+            "[Curriculum] Phase 1: "
+            f"abort=True, t_ho_prep={config.t_ho_prep}, "
+            "terminate_on_pp=False, cycle_on_reset=False"
+        )
         print("[Curriculum] After failure, the next episode starts at failure timestep + 1.")
     elif phase == 2:
         # Phase 2: Episodes also terminate on PP events.
@@ -118,7 +122,11 @@ def train_ppo(
         config.t_ho_prep = 5
         config.cycle_on_reset = True
         config.continue_after_failure = True
-        print("[Curriculum] Phase 2: abort=True, t_ho_prep=5, terminate_on_rlf=True, terminate_on_pp=True, cycle_on_reset=True")
+        print(
+            "[Curriculum] Phase 2: "
+            f"abort=True, t_ho_prep={config.t_ho_prep}, terminate_on_rlf=True, "
+            "terminate_on_pp=True, cycle_on_reset=True"
+        )
         print("[Curriculum] After failure, the next episode starts at failure timestep + 1.")
         if load_model is None:
             print("[WARNING] Phase 2 without --load-model: training from scratch.")
