@@ -45,6 +45,7 @@ class Config:
     # PPO parameters
     rew_const: float = 0.95  # reward constant
     net_arch: list[int] = field(default_factory=lambda: [64, 128, 64])
+    lock_target_during_ho_prep: bool = True  # Keep the selected target until prep ends
 
     # Training parameters
     use_wandb: bool = False  # Use Weights & Biases for logging
@@ -54,7 +55,7 @@ class Config:
     batch_size: int = 200
     n_epochs: int = 10
     lr: float = 3e-4       # Sửa từ 5e-5 thành 3e-4
-    ent_coef: float = 0.03 # Sửa từ 0.1 thành 0.01 (hoặc 0.02)
+    ent_coef: float = 0.005  # Limit random target switching during PPO exploration
 
     # Environment parameters
     terminate_on_pp: bool = True  # Terminate episode on ping-pong

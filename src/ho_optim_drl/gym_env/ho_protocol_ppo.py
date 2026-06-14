@@ -269,6 +269,7 @@ class HOProcedurePPO:
         self.verbose = 0
 
         self.permit_ho_prep_abort = config.permit_ho_prep_abort
+        self.lock_target_during_ho_prep = config.lock_target_during_ho_prep
 
         # General tasks
         self.sync_source = SyncSignal(
@@ -469,6 +470,11 @@ class HOProcedurePPO:
         if self.rrc.is_connected:  # Connected to cell
             pcell = self.rrc.pcell
             tcell = self.rrc.tcell
+
+            # Once preparation starts, keep its target stable. PPO still samples
+            # actions every step, but those actions apply only after prep ends.
+            if self.lock_target_during_ho_prep and self.cntr["ho_prep"].pending:
+                return
 
             # Trigger HO preparation if target cell is not None and different from current cell
             if tcell is not None and tcell != pcell:

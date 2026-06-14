@@ -99,26 +99,27 @@ def train_ppo(
     # --- Curriculum Learning ---
     if phase == 1:
         # Phase 1: Episodes terminate only on RLF or max timesteps.
-        # Custom experiment: permit_ho_prep_abort=True, t_ho_prep=3.
-        # Allows aborting but makes handovers easier by reducing prep time.
+        # Lock the first selected target and use a shorter preparation time.
         config.terminate_on_rlf = True
         config.terminate_on_pp = False
-        config.permit_ho_prep_abort = True
+        config.permit_ho_prep_abort = False
+        config.lock_target_during_ho_prep = True
         config.t_ho_prep = 3
         config.cycle_on_reset = False
         config.random_window_reset = True
-        print("[Curriculum] Phase 1: abort=True, t_ho_prep=3, terminate_on_pp=False")
+        print("[Curriculum] Phase 1: locked_target=True, t_ho_prep=3, terminate_on_pp=False")
         print("[Curriculum] Training uses random trace windows with prioritized failure replay.")
     elif phase == 2:
         # Phase 2: Episodes also terminate on PP events.
-        # Restores real 3GPP parameters: permit_ho_prep_abort=True, t_ho_prep=5.
+        # Restore the standard preparation time while keeping the target locked.
         config.terminate_on_rlf = True
         config.terminate_on_pp = True
-        config.permit_ho_prep_abort = True
+        config.permit_ho_prep_abort = False
+        config.lock_target_during_ho_prep = True
         config.t_ho_prep = 5
         config.cycle_on_reset = True
         config.random_window_reset = True
-        print("[Curriculum] Phase 2: abort=True, t_ho_prep=5, terminate_on_rlf=True, terminate_on_pp=True")
+        print("[Curriculum] Phase 2: locked_target=True, t_ho_prep=5, terminate_on_rlf=True, terminate_on_pp=True")
         print("[Curriculum] Training uses random trace windows with prioritized failure replay.")
         if load_model is None:
             print("[WARNING] Phase 2 without --load-model: training from scratch.")
