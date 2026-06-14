@@ -61,7 +61,7 @@ class HandoverEnvPPO(gym.Env):
         self.failure_window_count = 0
 
         # Observation space
-        self.n_observations = 2 * self.n_bs + 1
+        self.n_observations = 3 * self.n_bs + 5
         self.o_low = np.zeros(self.n_observations, dtype=np.float32)
         self.o_high = np.ones(self.n_observations, dtype=np.float32)
         self.observation_space = spaces.Box(self.o_low, self.o_high, dtype=np.float32)
@@ -108,6 +108,7 @@ class HandoverEnvPPO(gym.Env):
         self.lifetime_rlf_count = 0
         self.lifetime_pp_count = 0
         self.lifetime_ho_prep_count = 0
+        self.lifetime_ho_prep_aborted_count = 0
         self.lifetime_ho_exec_count = 0
         self.lifetime_ho_completed_count = 0
         self.episode_survival_rates = []  # Track rolling survival rate percentage
@@ -168,6 +169,9 @@ class HandoverEnvPPO(gym.Env):
             self.lifetime_rlf_count += len(counters["rlfr"].start_idxs)
             self.lifetime_pp_count += len(counters["mtsc"].aborted_idxs)
             self.lifetime_ho_prep_count += len(counters["ho_prep"].start_idxs)
+            self.lifetime_ho_prep_aborted_count += len(
+                counters["ho_prep"].aborted_idxs
+            )
             self.lifetime_ho_exec_count += len(counters["ho_exec"].start_idxs)
             self.lifetime_ho_completed_count += len(counters["ho_exec"].done_idxs)
 
@@ -341,11 +345,15 @@ class HandoverEnvPPO(gym.Env):
         self.s_rel_mtsc_cnt.append(0.0)
 
         # Initial state
-        s_pcell_indicator = np.zeros(self.n_bs)
-        s_pcell_indicator[pcell] = 1
-        input_sinr = self.sinr_norm_list[self.dataset_idx][self.t, :]
-        s_pp_indicator = np.array([0])
-        self.state = np.concatenate((s_pcell_indicator, input_sinr, s_pp_indicator))
+        self.state = self._build_observation(
+            pcell=pcell,
+            tcell=None,
+            ho_prep_progress=0.0,
+            ho_exec_progress=0.0,
+            mts_progress=0.0,
+            rlf_progress=0.0,
+            connected=True,
+        )
 
         return np.array(self.state, dtype=np.float32), {
             "dataset_idx": self.dataset_idx,
@@ -354,6 +362,46 @@ class HandoverEnvPPO(gym.Env):
             "sampling_source": self.episode_sampling_source,
             "failure_region_count": len(self.failure_regions),
         }
+
+    def _build_observation(
+        self,
+        *,
+        pcell: int | None,
+        tcell: int | None,
+        ho_prep_progress: float,
+        ho_exec_progress: float,
+        mts_progress: float,
+        rlf_progress: float,
+        connected: bool,
+    ) -> np.ndarray:
+        """Build the normalized PPO observation for the current trace timestep."""
+        serving_cell = np.zeros(self.n_bs, dtype=np.float32)
+        if pcell is not None:
+            serving_cell[pcell] = 1.0
+
+        target_cell = np.zeros(self.n_bs, dtype=np.float32)
+        if tcell is not None:
+            target_cell[tcell] = 1.0
+
+        sinr = np.asarray(
+            self.sinr_norm_list[self.dataset_idx][self.t, :],
+            dtype=np.float32,
+        )
+        protocol_state = np.array(
+            [
+                ho_prep_progress,
+                ho_exec_progress,
+                mts_progress,
+                rlf_progress,
+                float(connected),
+            ],
+            dtype=np.float32,
+        )
+
+        observation = np.concatenate(
+            (serving_cell, target_cell, sinr, protocol_state)
+        )
+        return np.clip(observation, self.o_low, self.o_high)
 
     def step(
         self, action: int | np.ndarray
@@ -395,14 +443,17 @@ class HandoverEnvPPO(gym.Env):
 
         self.t += 1
 
-        s_bs = np.zeros(self.n_bs)  # PCell indicator flag
         pcell = self.ho_procedure.rrc.pcell
-        if pcell is not None:
-            s_bs[pcell] = 1
-        s_sinr = self.sinr_norm_list[self.dataset_idx][self.t, :]  # Next RSRP values
-        s_pp = np.array([self.ho_procedure.cntr["mtsc"].pending])
-
-        self.state = np.concatenate((s_bs, s_sinr, s_pp))
+        tcell = self.ho_procedure.rrc.ncell
+        self.state = self._build_observation(
+            pcell=pcell,
+            tcell=tcell,
+            ho_prep_progress=raw_obs["ho_prep_rel_cnt"],
+            ho_exec_progress=raw_obs["ho_exec_rel_cnt"],
+            mts_progress=raw_obs["mtsc_rel_cnt"],
+            rlf_progress=raw_obs["n310_t310_rel_cnt"],
+            connected=self.ho_procedure.rrc.is_connected,
+        )
 
         return (
             np.array(tuple(self.state), dtype=np.float32),
